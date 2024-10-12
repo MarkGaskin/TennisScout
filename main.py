@@ -8,6 +8,7 @@ from ball_detector import BallDetector
 from utils import scene_detect
 import argparse
 import torch
+from datetime import datetime
 
 def read_video(path_video):
     cap = cv2.VideoCapture(path_video)
@@ -29,7 +30,7 @@ def get_court_img():
     court_img = (np.stack((court, court, court), axis=2)*255).astype(np.uint8)
     return court_img
 
-def main(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
+def process(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
          draw_trace=False, trace=7):
     """
     :params
@@ -115,18 +116,47 @@ def write(imgs_res, fps, path_output_video):
     for num in range(len(imgs_res)):
         frame = imgs_res[num]
         out.write(frame)
-    out.release()    
+    out.release()
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Process video for tennis scouting.')
 
-if __name__ == '__main__':
+    # Optional arguments with default values
+    parser.add_argument('--path_ball_track_model',
+                        default='models/model_best.pt',
+                        help='Path to the ball tracking model.')
+    parser.add_argument('--path_court_model',
+                        default='models/model_tennis_court_det.pt',
+                        help='Path to the court detection model.')
+    parser.add_argument('--path_bounce_model',
+                        default='models/ctb_regr_bounce.cbm',
+                        help='Path to the bounce model.')
+    parser.add_argument('--path_input_video',
+                        default='videos/clip1.mp4',
+                        help='Path to the input video file.')
+    parser.add_argument('--path_output_video',
+                        help='Path to the output video file. Defaults to <timestamp>.mp4')
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--path_ball_track_model', type=str, help='path to pretrained model for ball detection')
-    parser.add_argument('--path_court_model', type=str, help='path to pretrained model for court detection')
-    parser.add_argument('--path_bounce_model', type=str, help='path to pretrained model for bounce detection')
-    parser.add_argument('--path_input_video', type=str, help='path to input video')
-    parser.add_argument('--path_output_video', type=str, help='path to output video')
     args = parser.parse_args()
+
+# If output video path is not provided, use timestamp as default
+    if args.path_output_video is None:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        args.path_output_video = f'{timestamp}.mp4'
+
+    # Ensure the output file has .mp4 extension
+    elif not args.path_output_video.endswith('.mp4'):
+        args.path_output_video += '.mp4'
+
+    # Add to output/ folder
+    if not args.path_output_video.startswith('output/'):
+        args.path_output_video = "output/" + args.path_output_video
+
+    return args
+    
+
+def main():
+    args = parse_args()
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f'Using device (cpu/cuda): {device}')
@@ -152,12 +182,13 @@ if __name__ == '__main__':
     y_ball = [x[1] for x in ball_track]
     bounces = bounce_detector.predict(x_ball, y_ball)
 
-    imgs_res = main(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
+    imgs_res = process(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
                     draw_trace=True)
 
     write(imgs_res, fps, args.path_output_video)
 
 
-
+if __name__ == '__main__':
+    main()
 
 
