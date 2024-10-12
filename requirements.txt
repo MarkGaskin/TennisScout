@@ -1,0 +1,11 @@
+matplotlib==3.8.2
+scenedetect==0.6.1
+numpy==1.26.4
+scipy==1.11.3
+torch==2.0.1
+torchvision==0.15.2
+pandas==2.1.4
+sympy==1.12.1
+tqdm==4.42.1
+opencv_python==4.10.0.84
+catboost==1.2.7
