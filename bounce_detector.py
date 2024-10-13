@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.spatial import distance
+import cv2
 
 class BounceDetector:
     def __init__(self, path_model=None):
@@ -96,3 +97,43 @@ class BounceDetector:
         return ind_bounce_filtered
 
 
+    def calculate_velocity_at_bounces(self, x_ball, y_ball, bounce_frames, frame_rate, homography_matrices, gravity=9.81, window_size=5):
+        """
+        Calculate the real-world velocity of the ball at bounce frames using homography matrices.
+
+        :param x_ball: List of x coordinates of the ball.
+        :param y_ball: List of y coordinates of the ball.
+        :param bounce_frames: List of frame indices where bounces occur.
+        :param frame_rate: The frame rate of the video or data capture (frames per second).
+        :param homography_matrices: List of homography matrices for each frame.
+        :param gravity: The acceleration due to gravity (default is 9.81 m/s^2).
+        :param window_size: The number of frames to consider for velocity calculation.
+        :return: Dictionary with bounce frame indices as keys and tuples of speed and direction (angle in degrees) as values.
+        """
+        velocities = {}
+
+        for frame in bounce_frames:
+            if frame >= window_size and frame < len(homography_matrices):
+                homography_matrix = homography_matrices[frame]
+                if homography_matrix is not None:
+                    # Get the ball coordinates for the window of frames
+                    window_x = x_ball[frame-window_size+1:frame+1]
+                    window_y = y_ball[frame-window_size+1:frame+1]
+                    
+                    # Transform the ball's image coordinates to real-world coordinates for the window
+                    window_points = np.array(list(zip(window_x, window_y))).reshape(-1, 1, 2)
+                    real_world_points = cv2.perspectiveTransform(window_points.astype(np.float32), homography_matrix).reshape(-1, 2)
+
+                    # Calculate average differences in position over the window
+                    dx = np.mean([real_world_points[j+1, 0] - real_world_points[j, 0] for j in range(window_size-1)])
+                    dy = np.mean([real_world_points[j+1, 1] - real_world_points[j, 1] - (0.5 * gravity * (1 / frame_rate)**2) for j in range(window_size-1)])
+                    
+                    # Calculate speed (distance per time)
+                    speed = np.sqrt(dx**2 + dy**2) * frame_rate
+                    
+                    # Calculate direction (angle in degrees)
+                    direction = np.degrees(np.arctan2(dy, dx))
+                    
+                    velocities[frame] = (speed, direction)
+
+        return velocities

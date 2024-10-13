@@ -9,6 +9,20 @@ from utils import scene_detect
 import argparse
 import torch
 from datetime import datetime
+from dataclasses import dataclass
+from typing import List, Tuple
+
+
+@dataclass
+class Bounce:
+    frame: int
+    speed: float
+    direction: float
+    homography_matrix: any
+
+@dataclass
+class Bounces:
+    bounces: List[Bounce]
 
 def read_video(path_video):
     cap = cv2.VideoCapture(path_video)
@@ -30,7 +44,7 @@ def get_court_img():
     court_img = (np.stack((court, court, court), axis=2)*255).astype(np.uint8)
     return court_img
 
-def process(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
+def process(frames, scenes, bounces: Bounces, ball_track, homography_matrices, kps_court,
          draw_trace=False, trace=7):
     """
     :params
@@ -51,6 +65,9 @@ def process(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
     width_minimap = 166
     height_minimap = 350
     is_track = [x is not None for x in homography_matrices] 
+    
+    current_bounce = None
+    
     for num_scene in range(len(scenes)):
         sum_track = sum(is_track[scenes[num_scene][0]:scenes[num_scene][1]])
         len_track = scenes[num_scene][1] - scenes[num_scene][0]
@@ -93,7 +110,8 @@ def process(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
                 height, width, _ = img_res.shape
 
                 # draw bounce in minimap
-                if i in bounces and inv_mat is not None:
+                bounce = next((b for b in bounces.bounces if b.frame == i), None)
+                if bounce and inv_mat is not None:
                     ball_point = ball_track[i]
                     ball_point = np.array(ball_point, dtype=np.float32).reshape(1, 1, 2)
                     ball_point = cv2.perspectiveTransform(ball_point, inv_mat)
@@ -104,6 +122,31 @@ def process(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
                 
                 minimap = cv2.resize(minimap, (width_minimap, height_minimap))
                 img_res[30:(30 + height_minimap), (width - 30 - width_minimap):(width - 30), :] = minimap
+
+                if bounce:
+                    current_bounce = bounce
+
+                # Write velocity information under the minimap
+                if current_bounce:
+                    # Format the speed and direction
+                    speed_text = f"Speed: {current_bounce.speed:.2f} m/s"
+                    direction_text = f"Direction: {current_bounce.direction:.2f}°"
+                    
+                    # Calculate the position for the text (right under the minimap)
+                    text_x = width - 30 - width_minimap
+                    text_y = 30 + height_minimap + 30  # 30 pixels below the minimap
+                    
+                    # Add a semi-transparent background for better readability
+                    overlay = img_res.copy()
+                    cv2.rectangle(overlay, (text_x, text_y - 25), (width - 30, text_y + 35), (0, 0, 0), -1)
+                    cv2.addWeighted(overlay, 0.5, img_res, 0.5, 0, img_res)
+                    
+                    # Write the speed and direction on the image
+                    cv2.putText(img_res, speed_text, (text_x, text_y), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.putText(img_res, direction_text, (text_x, text_y + 25), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
                 imgs_res.append(img_res)
 
         else:    
@@ -180,7 +223,15 @@ def main():
     bounce_detector = BounceDetector(args.path_bounce_model)
     x_ball = [x[0] for x in ball_track]
     y_ball = [x[1] for x in ball_track]
-    bounces = bounce_detector.predict(x_ball, y_ball)
+    bounce_frames = bounce_detector.predict(x_ball, y_ball)
+    velocities = bounce_detector.calculate_velocity_at_bounces(x_ball, y_ball, bounce_frames=bounce_frames, frame_rate=fps, homography_matrices=homography_matrices)
+
+    print('velocities:', velocities)
+    # Create Bounces object from bounce_frames and velocities
+    bounces = Bounces(bounces=[
+        Bounce(frame=frame, speed=velocity[0], direction=velocity[1], homography_matrix=homography_matrices[frame])
+        for frame, velocity in velocities.items()
+    ])
 
     imgs_res = process(frames, scenes, bounces, ball_track, homography_matrices, kps_court,
                     draw_trace=True)
